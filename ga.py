@@ -5,7 +5,7 @@ import random as rd
 import pylab as plb
 # from bokeh.plotting import figure, output_file, show
 
-from fitness import FitnessFunction2
+from fitness import FitnessFunction
 from snn import SpikingNeuralNetwork
 
 def mean(numbers): # Arithmetic mean fcn
@@ -32,13 +32,16 @@ class GeneticAlgorithm(object):
                  # SNN params:
                  node_types=['tonic_spike'],
                  n_nodes_input=None,
+                 n_nodes_cortex=None,
                  n_nodes_hidden=None,
                  n_nodes_output=None,
+                 intralayer_connections_flag=False,
                  add_bias=True,
                  out_ma_len=20,
                  tau=5.0,
                  weight_epsilon=0.01,
-                 max_ticks=1000):
+                 max_ticks=1000,
+                 switch_tick=500):
         # GA params:
         # len_indv - length of vector representing a single individual
         # pop_size - number of individuals in the population
@@ -56,13 +59,16 @@ class GeneticAlgorithm(object):
         # SNN params:
         # node_types - string name(s) of types of spiking neurons to be used for hidden layer
         # n_nodes_input - number of input nodes (not including the bias neuron)
+        # n_nodes_cortex - number of neurons that represent the desire to output one set of output values or another
         # n_nodes_hidden - number of hidden nodes (these are the only spiking neurons)
         # n_nodes_output - number of output nodes (CTRNN-type nodes)
+        # intralayer_connections_flag - use True if you want to wire hidden neurons with each other
         # add_bias - True/False flag that adds/removes bias node from input layer that always has 1.0 state
         # out_ma_len - length of the moving average window that is used to approximate firing of hidden neurons
         # tau - time constant for output neurons (larger values make for more slowly-changing neurons)
         # weight_epsilon - weights below this value are considered equal to 0
         # max_ticks - the number of time steps used to simulate SNN activity
+        # switch_tick - the tick when the cortical neurons will switch from one type of firing to another
         
         # GA stuff:
         self.len_indv=len_indv
@@ -81,13 +87,16 @@ class GeneticAlgorithm(object):
         # SNN stuff:
         self.node_types=node_types
         self.n_nodes_input=n_nodes_input
+        self.n_nodes_cortex=n_nodes_cortex
         self.n_nodes_hidden=n_nodes_hidden
         self.n_nodes_output=n_nodes_output
+        self.intralayer_connections_flag=intralayer_connections_flag
         self.add_bias=add_bias
         self.out_ma_len=out_ma_len
         self.tau=tau
         self.weight_epsilon=weight_epsilon
         self.max_ticks=max_ticks
+        self.switch_tick=switch_tick
     # end INIT   
     
     def save_weights_txt(self, weight_matrix, filename):
@@ -122,11 +131,22 @@ class GeneticAlgorithm(object):
         n_nodes_input = self.n_nodes_input
         if self.add_bias:
             n_nodes_input+=1
+        if self.n_nodes_cortex is not None:
+            n_nodes_cortex = self.n_nodes_cortex
         n_nodes_hidden = self.n_nodes_hidden
         n_nodes_output = self.n_nodes_output
         
         w_ih = np.zeros((n_nodes_input, n_nodes_hidden), dtype=float)
-        w_hh = np.zeros((n_nodes_hidden, n_nodes_hidden), dtype=float)
+        if self.intralayer_connections_flag:
+            w_hh = np.zeros((n_nodes_hidden, n_nodes_hidden), dtype=float)
+        else:
+            w_hh = None
+            
+        if self.n_nodes_cortex is not None:
+            w_ch = np.zeros((n_nodes_cortex, n_nodes_hidden), dtype=float)
+        else:
+            w_ch = None
+            
         w_ho = np.zeros((n_nodes_hidden, n_nodes_output), dtype=float)
         
         pointer = 0
@@ -139,13 +159,23 @@ class GeneticAlgorithm(object):
         
         pointer = end_id
         
-        for row in xrange(0, n_nodes_hidden):
-            start_id = row * n_nodes_hidden + pointer
-            end_id = start_id + n_nodes_hidden
-                        
-            w_hh[row,] = pop_member[start_id:end_id]
+        if self.n_nodes_cortex is not None:
+            for row in xrange(0, n_nodes_cortex):
+                start_id = row * n_nodes_hidden + pointer
+                end_id = start_id + n_nodes_hidden
+            
+                w_ch[row,] = pop_member[start_id:end_id]
         
         pointer = end_id
+        
+        if self.intralayer_connections_flag:
+            for row in xrange(0, n_nodes_hidden):
+                start_id = row * n_nodes_hidden + pointer
+                end_id = start_id + n_nodes_hidden
+                        
+                w_hh[row,] = pop_member[start_id:end_id]
+        
+            pointer = end_id
         
         for row in xrange(0, n_nodes_hidden):
             start_id = row * n_nodes_output + pointer
@@ -157,13 +187,18 @@ class GeneticAlgorithm(object):
             filename = fname + '_IH.txt'
             self.save_weights_txt(w_ih, filename)
             
-            filename = fname + '_HH.txt'
-            self.save_weights_txt(w_hh, filename)            
+            if self.intralayer_connections_flag:
+                filename = fname + '_HH.txt'
+                self.save_weights_txt(w_hh, filename)   
+            
+            if self.n_nodes_cortex is not None:
+                filename = fname + '_CH.txt'
+                self.save_weights_txt(w_ch, filename)                   
             
             filename = fname + '_HO.txt'
             self.save_weights_txt(w_ho, filename)            
             
-        return (w_ih, w_hh, w_ho)        
+        return (w_ih, w_ch, w_hh, w_ho)        
         
     def get_fitness(self, pop_member):
         """
@@ -185,13 +220,13 @@ class GeneticAlgorithm(object):
                                        max_ticks=self.max_ticks)
         
         # Convert the vector into weight matrices:
-        (w_ih, w_hh, w_ho) = self.convert_pop_member(pop_member, save_flag=False)
+        (w_ih, w_ch, w_hh, w_ho) = self.convert_pop_member(pop_member, save_flag=False)
         
         # update the SNN with weight matrices:
-        network.from_matrix(w_ih, w_hh, w_ho, self.node_types)    
+        network.from_matrix(w_ih, w_hh, w_ho, w_ch, self.node_types)    
             
         # Init a FitnessFunction object to evaluate the SNN:
-        fitness_fcn = FitnessFunction2(self.target_values)
+        fitness_fcn = FitnessFunction(self.target_values)
         
         # Now evaluate the network:
         fitness_score = fitness_fcn.evaluate(network)    
@@ -393,14 +428,21 @@ class GeneticAlgorithm(object):
                                                 max_ticks=self.max_ticks)
         
             # Convert the vector into weight matrices:
-            (w_ih, w_hh, w_ho) = self.convert_pop_member(pop[best5_ids[0]], save_flag=False)
+            (w_ih, w_ch, w_hh, w_ho) = self.convert_pop_member(pop[best5_ids[0]], save_flag=False)
         
             # update the SNN with weight matrices:
-            best_network.from_matrix(w_ih, w_hh, w_ho, self.node_types)      
+            best_network.from_matrix(w_ih, w_hh, w_ho, w_ch, self.node_types)      
             
+            print "Using the switch tick =", best_network.switch_tick
             # now plot behavior: 
-            self.show_behavior(best_network)       
-        
+            self.show_behavior(best_network, file_tag='switch@500') 
+            
+            # now test the behavior with the switching ticked moved away from
+            # the value used during the training:
+            best_network.switch_tick = 700
+            print "Using the switch tick =", best_network.switch_tick                
+            self.show_behavior(best_network, file_tag='switch@700')
+            
         # FITNESS PLOT:    
         #
         # create a new plot:
@@ -414,7 +456,7 @@ class GeneticAlgorithm(object):
         plb.show()
     # end EVOLVE        
 
-    def show_behavior(self, network):
+    def show_behavior(self, network, file_tag=None):
         """
         This method plots behavior of output nodes vs. the targets
         """
@@ -426,13 +468,17 @@ class GeneticAlgorithm(object):
         for node in xrange(0,network.n_nodes_output):
             plb.figure(figsize=(12.0,10.0))
             plb.plot(ticks, network.out_states_history[:,node],'r',label='Output node '+str(node))
-            target_vector = np.full((network.max_ticks), self.target_values[node])
-            plb.plot(ticks, target_vector, 'b', label='Target for node '+str(node))
+            target_vector_01 = np.full((1, network.switch_tick), self.target_values[node,0])
+            target_vector_02 = np.full((1, network.max_ticks - network.switch_tick), self.target_values[node,1])
+            target_vector = np.hstack((target_vector_01,target_vector_02))
+            # print "Targets' vector shape:", target_vector.shape
+            # print "Ticks' shape:", ticks.shape
+            plb.plot(ticks, target_vector[0,:], 'b', label='Target for node '+str(node))
             plb.title('Behavior plot')
             plb.xlabel('Simulation tick')
             plb.ylabel('Node output vs. target')
             plb.legend()
-            plb.savefig('behavior_plot_out_node_'+str(node)+'.png', dpi=300)
+            plb.savefig('behavior_plot_out_node_'+str(node)+'_'+file_tag+'.png', dpi=300)
             plb.show()
             
         # Plot the spiking activity of hidden nodes (in 1000 ticks epochs):
@@ -469,7 +515,7 @@ class GeneticAlgorithm(object):
         axes.set_ylim([0,self.n_nodes_hidden+1])
         axes.set_xlim([0,self.max_ticks+1])
         plb.show()
-        current_figure.savefig('spikes_plot.png', dpi=300)                
+        current_figure.savefig('spikes_plot_'+file_tag+'.png', dpi=300)                
 
             
     # END SHOW_BEHAVIOR

@@ -8,6 +8,7 @@ An object of this class should have the following functionality:
 """
 
 import numpy as np
+np.set_printoptions(precision=3)
 # from snn import SpikingNeuralNetwork
 
 
@@ -30,13 +31,33 @@ class FitnessFunction(object):
         rmse_total = 0.0
         rmse_this = 0.0
         for idx in xrange(0, network.n_nodes_output):
-            rmse_this = np.sqrt(((network.out_states_history - self.target_vals[idx]) ** 2).mean())
+            """
+            # DEBUG:
+            # print "network.out_states_history=",network.out_states_history[:,idx]
+            for tick in xrange(0,network.max_ticks):
+                print "=== Tick",tick,"==="
+                print "output_node[",idx,"] =", network.out_states_history[tick,idx]
+
+            for tick in xrange(0,network.max_ticks):
+                print "=== Tick",tick,"==="
+                print "output_node[",idx,"] - target_vals[",idx,"]=", network.out_states_history[tick,idx] - self.target_vals[idx]
+
+            for tick in xrange(0,network.max_ticks):
+                print "=== Tick",tick,"==="
+                print "SQRT(output_node[",idx,"] - target_vals[",idx,"])**2=", np.sqrt( (network.out_states_history[tick,idx] - self.target_vals[idx])**2 )                
+            """    
+            rmse_this = np.sqrt(((network.out_states_history[200:network.switch_tick,idx] - self.target_vals[idx, 0]) ** 2).mean())
+            rmse_this += np.sqrt(((network.out_states_history[network.switch_tick+200:,idx] - self.target_vals[idx, 1]) ** 2).mean())
+            """
+            # DEBUG:
+            print "RMSE_this =", rmse_this
+            """
             rmse_total += rmse_this
             rmse_this = 0.0
         
         rmse_total = rmse_total / network.n_nodes_output
         
-        return 1000.0 * (1.0 / (1.0 + rmse_total))
+        return (1.0 / (1.0 + rmse_total))
     
 
 class FitnessFunction2(object):
@@ -74,13 +95,13 @@ class FitnessFunction2(object):
         output_nodes_indices = np.arange(0, network.n_nodes_output)
         
         for idx in xrange(0, network.n_nodes_output):
-            rmse_this = np.sqrt(((network.out_states_history - self.target_vals[idx]) ** 2).mean())
+            rmse_this = np.sqrt(((network.out_states_history[200:,idx] - self.target_vals[idx]) ** 2).mean())
             rmse_total += rmse_this
             rmse_this = 0.0
 
             other_output_node_indices = np.delete(output_nodes_indices,idx)
             for other_idx in other_output_node_indices:
-                proximity_error_this = np.sqrt(((network.out_states_history - self.target_vals[other_idx]) ** 2).mean())
+                proximity_error_this = np.sqrt(((network.out_states_history[200:,idx] - self.target_vals[other_idx]) ** 2).mean())
                 proximity_error_total += proximity_error_this
                 proximity_error_this = 0.0
             # Average by the number of comparisons made for a single output neuron:    
