@@ -371,7 +371,7 @@ class SpikingNeuralNetwork(object):
         
         return self
     
-    def run(self):
+    def run(self, verbose=False):
         """
         Since the output neurons are not spiking and depend on the moving average across some window of
         spikes produced by hidden neurons, this method will run the SNN prescribed number of ticks (max_ticks).
@@ -383,7 +383,7 @@ class SpikingNeuralNetwork(object):
         """
         # IMPORTANT HARDCODED PARAMETER
         # Integration time steps for updating output neurons:
-        integration_steps = 4    
+        integration_steps = 10    
         
         # init the matrix that will keep the states of output neurons:
         out_states_history = np.zeros((self.max_ticks, self.n_nodes_output))  # Each row represents the states of output neurons during the previous tick  
@@ -439,30 +439,35 @@ class SpikingNeuralNetwork(object):
                 for i in xrange(0, self.n_nodes_hidden):
                     hidden_avg_states[i] = np.mean(hid_states_history[t+1-window_len:t, i])
             
+                    if verbose:
                     # DEBUG:
-                    # print "Avging hidden neuron #",i
-                    # print "Looking up its states over the period [",t+1-window_len,",",t,"]"
-                    # print "Its history of firing:",hid_states_history[t+1-window_len:t, i]
-                    # print "Therefore, its avg. firing rate =",hidden_avg_states[i]
-                
+                        # print "Avging hidden neuron #",i
+                        # print "Looking up its states over the period [",t+1-window_len,",",t,"]"
+                        # print "Its history of firing:",hid_states_history[t+1-window_len:t, i]
+                        # print "Therefore, its avg. firing rate =",hidden_avg_states[i]
+                        print "Neuron",i," avg. fir.rate =",hidden_avg_states[i]
+                        
             # now update states of output neurons:
             for i in xrange(0,self.n_nodes_output):
                 
                 # DEBUG:
-                # print "Calculating influence on output neuron #", i
+                if verbose:    
+                    print "Calculating influence on output neuron #", i
                 
                 # first calculate the sum of influences of all hidden neurons on this output neuron:
                 influence = 0.0    
                 for j in xrange(0,self.n_nodes_hidden):
                     
+                    if verbose:
                     # DEBUG:
-                    # print "Avg. state of hidden neuron #",j,"is", hidden_avg_states[j]
-                    # print "w_ho[",j,",",i,"] =", self.w_ho[j,i]
+                        # print "Avg. state of hidden neuron #",j,"is", hidden_avg_states[j]
+                        print "Weight w_ho[",j,",",i,"] =", self.w_ho[j,i]
                     
                     influence += self.w_ho[j,i] * hidden_avg_states[j]
                    
+                    if verbose:
                     # DEBUG:
-                    # print "Updated influence =", influence
+                        print "Updated influence =", influence
                     
                 # numerically integrating using forward Euler method with 2 time steps:
                 
@@ -474,7 +479,9 @@ class SpikingNeuralNetwork(object):
                 
                     # DEBUG
                     # print "Intrg.step", h, "out_state[",i,"] =", out_state[i]
-                    
+            if verbose:
+                print "Output neurons' states:", out_state
+                
             out_states_history[t,] = out_state
            
         # end MAIN CYCLE 
@@ -483,125 +490,8 @@ class SpikingNeuralNetwork(object):
         
         return self
     # end RUN
-
-    
-    """
-    This function should output what the network is doing: spikes and/or membrane potentials 
-    as well as printing the cm that is used (to make sure that there are all vital connections 
-    btw layers)
-    """
-    # plot_spikes = True, plot_EEG = False, plot_spectrogram = False,
-    def plot_behavior(self, filename, save_cm = False, save_spikes = False, save_v = False, add_bias=False):
-        # Function that will run the SNN and record its spikes. 
-        # Optional: 
-        # 1. Create pseudo-EEG and plot it
-        # 2. Create spectrogram and plot it
-        # 3. Save spikes in a text file, plots as .png
-        
-        # Imports:
-        import pylab as plb
-        
-        # Some housekeeping:
-        # n_nodes_all = self.num_nodes()
-        n_nodes_input = self.n_nodes_input
-        n_nodes_output = self.n_nodes_output
-        n_nodes_hidden = self.n_nodes_hidden
-        
-        # get connectivity matrix:
-        cm = self.cm
-        
-        # (Optional) Remove unnecessary connection weights:
-        # network.condition_cm()
-        
-        # number of simulation steps:
-        max_t = 1000
-        # Array to sum all of the spikes of output neurons (to estimate the firing rates):
-        firings = np.zeros(n_nodes_output)
-        # Array to record all of the spikes of hidden and output neurons each tick in binary format:
-        spikes = np.zeros((max_t, n_nodes_hidden + n_nodes_output))
-        # Array to record all of the spikes of hidden and output neurons each tick in [neuron_id, tick] format:
-        
-        # Array with first inputs:
-        first_input = np.ones(n_nodes_input) 
-
-        # Save connection matrix:
-        if save_cm:
-            np.savetxt(filename+'_cm.txt', cm, fmt = '%3.3f')
-        
-        fired_this_tick = np.zeros(1)
-        ticks = np.zeros(1)
-        
-        # Create the matrix to hold all of the v's:
-        if save_v:
-            archive_v = np.zeros((max_t, n_nodes_hidden + n_nodes_output))    
-        
-        # Run the simulation:
-        for tick in xrange(0, max_t):
-            # On the first tick, feed the SNN with preset inputs. 
-            # During all other ticks, feed the SNN with spikes from output nodes:
-            if tick == 0:    
-                self = self.feed(first_input, add_bias=add_bias)
-            else:
-                self = self.feed(outputs, add_bias=add_bias)
-            # Grab the output
-            outputs = self.fired_ids[-n_nodes_output:]
-            
-            # save the current state:
-            if save_v:    
-                archive_v[tick] = self.v
-                
-            # record the state of the hidden and output neurons:
-            spikes[tick] = self.fired_ids  
-            
-            for temp_idx2 in xrange(0, n_nodes_hidden + n_nodes_output):
-                if spikes[tick, temp_idx2] == 1.0:
-                    fired_this_tick = np.append(fired_this_tick, float(temp_idx2))
-                    ticks = np.append(ticks, float(tick))
-            
-            # add new spikes fired on output neurons:
-            for out_idx in xrange(0, n_nodes_output):
-                firings[out_idx] += outputs[out_idx] 
-                
-        # Save the archive of v's:
-        if save_v:
-            np.savetxt(filename+'_v.txt', archive_v, fmt = '%8.3f')        
-                
-        # Print the firing rates:
-        for out_idx in xrange(0, n_nodes_output):
-            print "Output neuron #", out_idx, "has firing rate =", firings[out_idx] 
-        
-        # plot spikes only if there are spikes:
-        if np.sum(ticks) > 0.0:    
-            # Record spikes as a plot and .txt file:
-            plb.figure(figsize=(12.0,10.0))
-            # plb.figure()
-            # time_array = np.arange(max_t)
-            plb.title('Spikes')
-            plb.xlabel('Time, ms')
-            plb.ylabel('Neuron #')
-            plb.plot(ticks, fired_this_tick,'k.')
-            fig1 = plb.gcf()
-            axes = plb.gca()
-            axes.set_ylim([0,n_nodes_hidden + n_nodes_output])
-            axes.set_xlim([0,max_t])
-            plb.show()          
-        
-            if save_spikes:
-                fig1.savefig(filename+"_spikes.png", dpi=300) 
-        else:
-            print "No spikes!"
-            
-        # Optional: 
-        # 1. Create pseudo-EEG and plot it
-        # 2. Create spectrogram and plot it
-        # 3. Save spikes in a text file, plots as .png
                 
                 
 # DON'T NEED THIS?
 if __name__ == '__main__':
-    # import doctest
-    # doctest.testmod(optionflags=doctest.ELLIPSIS)
-    # a = SpikingNeuralNetwork().from_matrix(np.array([[0,0,0],[0,0,0],[1,1,0]]))
-    # print a.cm_string()
-    # print a.feed(np.array([1,1]), add_bias=False)
     print "SNN class main"

@@ -1,166 +1,16 @@
 import numpy as np
+np.set_printoptions(precision=3)
 import math as m
-import os
-import sys
-# VACC only: 
-# import subprocess as subp
 import random as rd
-import time as t
-import shutil, errno
 import pylab as plb
 # from bokeh.plotting import figure, output_file, show
 
-from fitness import FitnessFunction
+from fitness import FitnessFunction2
 from snn import SpikingNeuralNetwork
 
 def mean(numbers): # Arithmetic mean fcn
     return float(sum(numbers)) / max(len(numbers), 1)
 # end MEAN fcn
-
-"""
-def read_text_file(fileName):
-    loadFlag = False
-    loadAttempt = 0
-    attemptMax = 10
-    dataVar = []
-    while (loadAttempt<attemptMax) & (loadFlag==False):
-        if(os.path.exists(fileName)==False):
-            # pause for 0.5 second:
-            t.sleep(0.5)
-            loadAttempt = loadAttempt + 1
-            print("Load attempt "+str(loadAttempt))
-        else:
-            fid = open(fileName,'r')
-            # read just one line from fit.txt
-            for line in fid:
-                dataVar += [float(line)]
-            # end FOR
-            fid.close()
-            loadFlag = True
-        # end IF
-
-        # if can't find the fit.txt file for a long time:
-        if loadAttempt >= attemptMax:
-            sys.exit('Can''t load '+fileName)
-        # end IF
-    # end WHILE
-    return dataVar
-# end DEF 
-    
-def write_text_file(fileName, data):
-    fid = open(fileName,'w+')
-    # check if data is 1 variable or list/array:
-    if (isinstance(data,float) or isinstance(data,int)):
-        fid.write(str(data))
-    else:
-        for j in xrange(0,len(data)):
-            fid.write(str(data[j])+"\n")
-        # end FOR
-    # end IF
-    fid.close()
-# end DEF
-    
-def read_txt(textFileName, data_type):
-    # new better txt loader, outputs a 1D list of values in the file
-    dataVar = []
-    fid = open(textFileName,'r')
-    for line in fid:
-        split_line = line.split(' ')
-        for values in split_line:
-            if values!='\n':
-                if data_type=='int':
-                    dataVar += [int(values)]
-                elif data_type=='float':
-                    dataVar += [float(values)]
-                # end IF
-            # end IF
-        # end FOR
-    # end FOR                  
-    fid.close()
-    return dataVar
-# end READTXT
-    
-def plot_spikes(pop_member, row_len):
-    # read the firings file
-    firings = read_txt("firings.txt", "int")
-    # select times and ids:
-    neuron_ids = firings[1::2]
-    spike_times = firings[0::2]
-    # get max neural sim time in ms
-    max_t = max(spike_times)
-    # get sample number:
-    max_samp = len(spike_times)
-    # init EEG array:
-    EEG = np.zeros((max_t))
-    # get number of neurons:
-    # N = max(neuron_ids)
-    
-    # sum all of the spikes to get the pseudo-EEG:
-    for samp in xrange(1,max_samp):
-        # Adjust for MATLAB indexing by 1:
-        curr_neur_num = neuron_ids[samp]-1
-        curr_neur_sign = (pop_member[curr_neur_num * row_len]-0.5)/0.5
-        curr_spike_time = spike_times[samp]-1
-        EEG[curr_spike_time] = EEG[curr_spike_time] + curr_neur_sign
-    # end FOR
-        
-    # PERFORM SPECTRAL ANALYSIS:
-
-    # split long recordings into 1000 ms epochs:
-    epoch_size = 1000
-    num_epochs = max_t / epoch_size
-    for epoch in xrange(0, num_epochs):
-        #    
-        epoch_begin = epoch * epoch_size
-        epoch_end = epoch_begin + epoch_size
-        plb.figure(figsize=(24.0,20.0))
-        plb.suptitle('Neural dynamics '+str(epoch_begin)+' to '+str(epoch_end)+' ms')
-        time_array = (np.arange(max_t)+1)
-        # Spike raster:
-        plb.subplot(411)
-        plb.title('Spikes')
-        plb.xlabel('Time, ms')
-        plb.ylabel('Neuron #')
-        # find indices of spike_times that are closest to the epoch boundaries:
-        time_begin_id,_  = min(enumerate(spike_times), key=lambda x: abs(x[1]-epoch_begin))
-        time_end_id,_  = min(enumerate(spike_times), key=lambda x: abs(x[1]-epoch_end))
-        # plot dots:
-        plb.plot(spike_times[time_begin_id:time_end_id], neuron_ids[time_begin_id:time_end_id],'k.')
-        
-        # EEG:    
-        plb.subplot(412)
-        plb.title('Pseudo-EEG')
-        plb.plot(time_array[epoch_begin:epoch_end],EEG[epoch_begin:epoch_end])
-        plb.axis('tight')
-        plb.xlabel('Time, ms')
-        plb.ylabel('Spike count')
-        
-        # Periodogram:
-        plb.subplot(413)
-        plb.title('Spectral density')
-        plb.psd(EEG[epoch_begin:epoch_end], Fs=1000)
-        axis_vals = plb.axis()
-        plb.axis([0, 100, axis_vals[2], axis_vals[3]])
-        
-        # Spectrogram:
-        plb.subplot(414)
-        plb.title('Spectrogram')
-        plb.specgram(EEG[epoch_begin:epoch_end], Fs=1000)
-        axis_vals = plb.axis()
-        plb.axis([0, 1, 0, 100])
-        plb.colorbar()
-        plb.savefig('neural_dynamics'+str(epoch)+'.png')        
-# end plotSpikes
-        
-def copyanything(src, dst):
-    try:
-        shutil.copytree(src, dst)
-    except OSError as exc: # python >2.5
-        if exc.errno == errno.ENOTDIR:
-            shutil.copy(src, dst)
-        else: raise
-# end COPYANYTHING  
-""" 
 
 class GeneticAlgorithm(object):
     # Comments:
@@ -178,6 +28,7 @@ class GeneticAlgorithm(object):
                  weight_range=50.0,
                  mut_range=10.0,
                  target_values=None,
+                 champions=None,
                  # SNN params:
                  node_types=['tonic_spike'],
                  n_nodes_input=None,
@@ -200,6 +51,7 @@ class GeneticAlgorithm(object):
         # weight_range - weights are generated within [-weight_range, weight_range]
         # mut_range - when mutation occurs, a weight is changed by a random integer from [-mut_range, mut_range]
         # target_values - the values that output neurons should match
+        # champions - best 10 individuals to be pickled
         
         # SNN params:
         # node_types - string name(s) of types of spiking neurons to be used for hidden layer
@@ -224,6 +76,7 @@ class GeneticAlgorithm(object):
         self.weight_range=weight_range
         self.mut_range=mut_range
         self.target_values=target_values
+        self.champions=champions
         
         # SNN stuff:
         self.node_types=node_types
@@ -282,59 +135,23 @@ class GeneticAlgorithm(object):
             start_id = row * n_nodes_hidden
             end_id = start_id + n_nodes_hidden
             
-            # DEBUG:
-            # print "W_IH. Processign row", row
-            # print "Start_id =", start_id
-            # print "End_id =", end_id
-            # print "w_ih[",row,",]=",w_ih[row,]
-            # print "pop_member[",start_id,":",end_id,"]", pop_member[start_id:end_id]
-            
-            
             w_ih[row,] = pop_member[start_id:end_id]
         
         pointer = end_id
         
-        # DEBUG
-        # print "w_ih=",w_ih
-        
         for row in xrange(0, n_nodes_hidden):
             start_id = row * n_nodes_hidden + pointer
             end_id = start_id + n_nodes_hidden
-
-            # DEBUG:
-            # print "W_HH. Processign row", row
-            # print "Start_id =", start_id
-            # print "End_id =", end_id
-            # print "w_hh[",row,",]=",w_hh[row,]
-            # print "pop_member[",start_id,":",end_id,"]", pop_member[start_id:end_id]
                         
             w_hh[row,] = pop_member[start_id:end_id]
         
         pointer = end_id
         
-        # DEBUG
-        # print "w_hh=",w_hh
-        
         for row in xrange(0, n_nodes_hidden):
             start_id = row * n_nodes_output + pointer
-            end_id = start_id + n_nodes_output
-            
-            # DEBUG:
-            # print "W_HO. Processign row", row
-            # print "Start_id =", start_id
-            # print "End_id =", end_id
-            # print "w_ho[",row,",]=",w_ho[row,]
-            # print "pop_member[",start_id,":",end_id,"]", pop_member[start_id:end_id]
-            
+            end_id = start_id + n_nodes_output            
             
             w_ho[row,] = pop_member[start_id:end_id]
-        
-        # DEBUG:
-        # print "w_ho=",w_ho
-        
-        # DEBUG:
-        # print "Pop.member had length",pop_member.shape[0]
-        # print "Last weight extracted from it had idx",end_id
         
         if save_flag:
             filename = fname + '_IH.txt'
@@ -374,7 +191,7 @@ class GeneticAlgorithm(object):
         network.from_matrix(w_ih, w_hh, w_ho, self.node_types)    
             
         # Init a FitnessFunction object to evaluate the SNN:
-        fitness_fcn = FitnessFunction(self.target_values)
+        fitness_fcn = FitnessFunction2(self.target_values)
         
         # Now evaluate the network:
         fitness_score = fitness_fcn.evaluate(network)    
@@ -476,13 +293,6 @@ class GeneticAlgorithm(object):
             for y in xrange(0, self.len_indv):
                 # roll a die for the first child:
                 if rd.uniform(0.0,1.0) < self.prob_mut:
-                    """
-                    if child1[y]==0: # determine the bit value and flip it
-                        child1[y]=1
-                    else:
-                        child1[y]=0
-                    # end IF
-                    """
                     child1[y]+=np.random.randint(-self.mut_range-1,self.mut_range+1)
                     # Check that result is within bounds:
                     if child1[y]>self.weight_range:
@@ -493,13 +303,6 @@ class GeneticAlgorithm(object):
             
                 # roll a die for the second child:
                 if rd.uniform(0.0,1.0) < self.prob_mut:
-                    """
-                    if child2[y]==0: # determine the bit value and flip it
-                        child2[y]=1
-                    else:
-                        child2[y]=0
-                    # end IF
-                    """
                     child2[y]+=np.random.randint(-self.mut_range-1,self.mut_range+1)
                     if child2[y]>self.weight_range:
                         child2[y]=self.weight_range
@@ -551,7 +354,6 @@ class GeneticAlgorithm(object):
                 if was_changed[member]==0:
                     fitness[member]=self.get_fitness(pop[member])
                     was_changed[member]=1
-                    # print "Evaluating",member,"member"
                 # end IF
             # end FOR
             
@@ -563,9 +365,6 @@ class GeneticAlgorithm(object):
     
             # select parents for mating:
             (par_ids, worst_ids) = self.select_parents(fitness)
-            # print "Chose parents",par_ids,"Will replace these",worst_ids
-            # for idx in xrange(0,len(worst_ids)):
-            #    print "Fitness[",worst_ids[idx],"]=",fitness[worst_ids[idx]]
     
             # replace worst with children produced by crossover and mutation:
             (pop,was_changed) = self.produce_offspring(pop, par_ids, worst_ids, was_changed)
@@ -573,12 +372,13 @@ class GeneticAlgorithm(object):
     
         # end FOR === MAIN CYCLE ===
         if save_results:
-            # SAVE 10 BEST:
-            best10_ids = fitness.argsort()[-10:][::-1]
-            for idx in xrange(0,len(best10_ids)):
+            # SAVE 5 BEST:
+            self.champions = np.zeros((5, self.len_indv), dtype='float')    
+            best5_ids = fitness.argsort()[-5:][::-1]
+            for idx in xrange(0,len(best5_ids)):
                 best_name = 'best_weights'+str(0)+str(idx+1)
-                self.convert_pop_member(pop[best10_ids[idx]], save_flag=True, fname=best_name)
-                #write_weights(best_name, pop[best10_ids[idx]], row_len)
+                self.convert_pop_member(pop[best5_ids[idx]], save_flag=True, fname=best_name)
+                self.champions[idx,] = pop[best5_ids[idx]]
             # end FOR
 
             # plot best behavior:
@@ -593,29 +393,13 @@ class GeneticAlgorithm(object):
                                                 max_ticks=self.max_ticks)
         
             # Convert the vector into weight matrices:
-            (w_ih, w_hh, w_ho) = self.convert_pop_member(pop[best10_ids[0]], save_flag=False)
+            (w_ih, w_hh, w_ho) = self.convert_pop_member(pop[best5_ids[0]], save_flag=False)
         
             # update the SNN with weight matrices:
             best_network.from_matrix(w_ih, w_hh, w_ho, self.node_types)      
             
             # now plot behavior: 
-            self.show_behavior(best_network)    
-            # os.mkdir('Results')
-            # os.chdir('Results')
-
-            # # copy DEMO to RESULTS:
-            # shutil.copyfile(currDir+"\\PDSTEP_demo.exe",currDir+'\\Results\\PDSTEP_demo.exe')
-            # shutil.copyfile(currDir+"\\PDSTEP_demo.ilk",currDir+'\\Results\\PDSTEP_demo.ilk')
-            # shutil.copyfile(currDir+"\\PDSTEP_demo.pdb",currDir+'\\Results\\PDSTEP_demo.pdb')
-            # shutil.copyfile(currDir+"\\PDSTEP_demo_x64_debug.pdb",currDir+'\\Results\\PDSTEP_demo_x64_debug.pdb')
-            # shutil.copyfile(currDir+"\\glut64.dll",currDir+'\\Results\\glut64.dll')
-            # shutil.copyfile(currDir+"\\best_weights01.txt",currDir+'\\Results\\weights.txt')
-        
-            # # run DEMO file that will export spike data:
-            # os.system('PDSTEP_demo.exe')
-        
-        # plot spiking data and analyze
-        # plot_spikes(pop[0], row_len)        
+            self.show_behavior(best_network)       
         
         # FITNESS PLOT:    
         #
@@ -635,87 +419,63 @@ class GeneticAlgorithm(object):
         This method plots behavior of output nodes vs. the targets
         """
         
+        # network.run(verbose=True)
         network.run()
-        gens=np.arange(0, network.max_ticks)
-        
-        # DEBUG:
-        # print "Output node 0 history:", network.out_states_history[:,0]
-        # print "Output node 1 history:", network.out_states_history[:,1]
-            
+        ticks=np.arange(0, network.max_ticks)
+        # Plot the behavior of the output nodes:    
         for node in xrange(0,network.n_nodes_output):
-            plb.figure()
-            plb.plot(gens, network.out_states_history[:,node],'r',label='Output node '+str(node))
+            plb.figure(figsize=(12.0,10.0))
+            plb.plot(ticks, network.out_states_history[:,node],'r',label='Output node '+str(node))
             target_vector = np.full((network.max_ticks), self.target_values[node])
-            plb.plot(gens, target_vector, 'b', label='Target for node '+str(node))
+            plb.plot(ticks, target_vector, 'b', label='Target for node '+str(node))
             plb.title('Behavior plot')
             plb.xlabel('Simulation tick')
             plb.ylabel('Node output vs. target')
             plb.legend()
-        # plb.savefig('behavior_plot.png')
+            plb.savefig('behavior_plot_out_node_'+str(node)+'.png', dpi=300)
             plb.show()
+            
+        # Plot the spiking activity of hidden nodes (in 1000 ticks epochs):
+        # 
+        # First, convert binary spike data into plottable format:
+        spike_neuron = []
+        spike_tick = []
+        for tick in xrange(0, network.max_ticks):
+            for node in xrange(0, network.n_nodes_hidden):
+                if network.hid_states_history[tick,node]>0.0:
+                    spike_neuron.append(node+1)
+                    spike_tick.append(tick)            
         
+            
+            
+            
+        # DEBUG:
+        # print "Outputting the hidden layer spikes:"
+        # for tick in xrange(0, self.max_ticks):
+        #     print network.hid_states_history[tick,]
+            
+        # num_epoch = int( np.floor(self.max_ticks-1 / 1000) ) + 1
+        
+        # DEBUG:
+        # print "Total ticks =", self.max_ticks
+        # print "Number of 1000 tick epochs (including the last that may be < 1000) =", num_epoch
+        
+        current_figure = plb.figure(figsize=(12.0,10.0))
+        plb.plot(spike_tick, spike_neuron,'k.')
+        plb.title('Spike Train Raster Plot')
+        plb.xlabel('Time, ticks')
+        plb.ylabel('Neuron #')
+        axes = plb.gca()
+        axes.set_ylim([0,self.n_nodes_hidden+1])
+        axes.set_xlim([0,self.max_ticks+1])
+        plb.show()
+        current_figure.savefig('spikes_plot.png', dpi=300)                
+
+            
     # END SHOW_BEHAVIOR
     
-    """
-    def write_weights(fileName, data, row_len):
-        fid = open(fileName,'w+')
-        for j in xrange(0,len(data)):
-            if m.fmod(j+1,row_len)==0:
-                fid.write(str(data[j])+"\n")
-            else:
-                fid.write(str(data[j])+" ")
-        # end FOR
-        fid.close()
-    """
-
     
 if __name__ == 'main':
     #
     #
-    """
-    # get current directory path:
-    currDir = os.getcwd()
-    # create a new, unique folder for the run:
-    EXP_ID = "ST-F"
-    timeStamp = t.localtime()
-    # Experiment ID tag has timestamp a random number (to make each folder have unique name)
-    uniq = int(rd.random()*1000)
-    folderName = EXP_ID+"-"+str(timeStamp.tm_mday)+"-"+str(timeStamp.tm_mon)\
-                +"-"+str(timeStamp.tm_year)+"-"+ str(timeStamp.tm_hour)\
-                +"-"+str(timeStamp.tm_min)+"-"+str(timeStamp.tm_sec)+"-"+str(uniq)  
-
-    # # SNN parameters:
-    num_input = 3
-    num_hidden = 24
-    num_output = 3
-    add_bias = True
-    # GA parameters:
-    # Each individual in the population contains weights that connect inputs to 
-    # hidden, hidden to hidden, and hidden to output:    
-    len_indv = num_input * num_hidden + num_hidden * num_hidden + num_hidden * num_output
-    if add_bias:
-        len_indv += num_hidden
-        # if there is a bias input neuron (which has always state = 1), need to 
-        # provide synaptic weights connecting this bias neuron with all of the 
-        # hidden neurons
-    pop_size = 50
-    prob_xover = 1.0
-    prob_mut = 0.05
-    prob_survival=0.05
-    num_par = 40
-    max_gen = 100
-    weight_range=50.0 # weights will be integers within [-weight_range; +weight_range]
-    
-    # Initialize genetic algorithm object:
-    genetic_algorithm = GeneticAlgorithm(len_indv=len_indv,
-                                         pop_size=pop_size,
-                                         num_par=num_par,
-                                         prob_mut=prob_mut, 
-                                         prob_xover=prob_xover,
-                                         prob_survival=prob_survival,
-                                         max_gen=max_gen,
-                                         weight_range=weight_range) 
-    
-    genetic_algorithm.evolve(verbose=True, save_results=True)
-    """
     print "Class GeneticAlgorithm"
