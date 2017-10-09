@@ -1,3 +1,7 @@
+"""
+Exp 9.4: Switching from state 1 to state 2 and then back to state 1.
+"""
+
 import numpy as np
 np.set_printoptions(precision=3)
 import math as m
@@ -41,7 +45,7 @@ class GeneticAlgorithm(object):
                  tau=5.0,
                  weight_epsilon=0.01,
                  max_ticks=1000,
-                 switch_tick=500):
+                 switch_tick=[300, 600]):
         # GA params:
         # len_indv - length of vector representing a single individual
         # pop_size - number of individuals in the population
@@ -433,15 +437,15 @@ class GeneticAlgorithm(object):
             # update the SNN with weight matrices:
             best_network.from_matrix(w_ih, w_hh, w_ho, w_ch, self.node_types)      
             
-            print "Using the switch tick =", best_network.switch_tick
+            print "Using the switch ticks =", best_network.switch_tick
             # now plot behavior: 
-            self.show_behavior(best_network, file_tag='switch@500') 
+            self.show_behavior(best_network, file_tag='switch@300_600') 
             
             # now test the behavior with the switching ticked moved away from
             # the value used during the training:
-            best_network.switch_tick = 700
+            best_network.switch_tick = [450, 750]
             print "Using the switch tick =", best_network.switch_tick                
-            self.show_behavior(best_network, file_tag='switch@700')
+            self.show_behavior(best_network, file_tag='switch@450_750')
             
         # FITNESS PLOT:    
         #
@@ -468,9 +472,10 @@ class GeneticAlgorithm(object):
         for node in xrange(0,network.n_nodes_output):
             plb.figure(figsize=(12.0,10.0))
             plb.plot(ticks, network.out_states_history[:,node],'r',label='Output node '+str(node))
-            target_vector_01 = np.full((1, network.switch_tick), self.target_values[node,0])
-            target_vector_02 = np.full((1, network.max_ticks - network.switch_tick), self.target_values[node,1])
-            target_vector = np.hstack((target_vector_01,target_vector_02))
+            target_vector_01 = np.full((1, network.switch_tick[0]), self.target_values[node,0])
+            target_vector_02 = np.full((1, network.switch_tick[1] - network.switch_tick[0]), self.target_values[node,1])
+            target_vector_03 = np.full((1, network.max_ticks - network.switch_tick[1]), self.target_values[node,0])
+            target_vector = np.hstack((target_vector_01,target_vector_02, target_vector_03))
             # print "Targets' vector shape:", target_vector.shape
             # print "Ticks' shape:", ticks.shape
             plb.plot(ticks, target_vector[0,:], 'b', label='Target for node '+str(node))

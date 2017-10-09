@@ -4,6 +4,8 @@ This version is for experiment 9.3: switching outputs mid-simulation.
 A cortical input added to the inputs. Weights connecting cortex with the hidden 
 layer are evolved too (for the lack of better judgement on what values should be
 hardcoded for them!)
+New in 9.4:
+    * Switch from state 1 to state 2 and then back to state 1
     
 """
 
@@ -158,7 +160,7 @@ class SpikingNeuralNetwork(object):
                  tau=1.5,
                  weight_epsilon=1e-3,
                  max_ticks=1000,
-                 switch_tick=500):
+                 switch_tick=[300, 600]):
         # Set instance vars
         self.w_ih                 = w_ih
         self.w_ch                 = w_ch
@@ -448,15 +450,18 @@ class SpikingNeuralNetwork(object):
         # Main cycle
         for t in xrange(0, self.max_ticks):
             # First, determine what type of cortical input to provide to the SNN:
-            if t < self.switch_tick:
+            if t < self.switch_tick[0]:
                 
                 # DEBUG:
                 # print "Tick",t,"< switch tick =", self.switch_tick
                 # print "Sending cortical input =", cortical_inputs[0,]
                 
                 cortical_input_this = cortical_inputs[0,]
-            else:
+            elif t>= self.switch_tick[0] and t < self.switch_tick[1]:
                 cortical_input_this = cortical_inputs[1,]
+            elif t >= self.switch_tick[1]:     
+                cortical_input_this = cortical_inputs[0,]
+                
             # during the first tick the SNN receives the maximal stimulus to bootstrap the neural activity:
             if t==0:
                 self.feed(np.ones(self.n_nodes_input), cortical_input_this)
