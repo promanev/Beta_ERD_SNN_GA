@@ -160,6 +160,9 @@ class SpikingNeuralNetwork(object):
                  max_ticks=1000,
                  switch_tick=500,
                  bg_nodes=2,
+                 ERD_tick=450,
+                 ERS_tick=550,
+                 bg_flag=False,
                  bg_sync_freq=25,
                  bg_is_sync=False):
         
@@ -182,6 +185,9 @@ class SpikingNeuralNetwork(object):
         self.max_ticks            = max_ticks
         self.switch_tick          = switch_tick
         self.bg_nodes             = bg_nodes
+        self.ERD_tick             = ERD_tick
+        self.ERS_tick             = ERS_tick
+        self.bg_flag              = bg_flag
         self.bg_sync_freq         = bg_sync_freq
         self.bg_is_sync           = bg_is_sync
 
@@ -348,7 +354,8 @@ class SpikingNeuralNetwork(object):
                     # print "bg_inputs[",i,"]=", bg_inputs[i]
                     # print "w_bgh[",i,",",j,"]=",self.w_bgh[i,j]
 #                    if bg_inputs[i] is not 0.0:
-                    I[j] += self.w_bgh[i,j] * bg_inputs[i]
+                    # I[j] += self.w_bgh[i,j] * bg_inputs[i]
+                    I[j] += -10.0 * bg_inputs[i]
             # DEBUG:
             # print "After processing BG_inputs, I=",I
         
@@ -467,8 +474,8 @@ class SpikingNeuralNetwork(object):
             else:
                 cortical_input_this = cortical_inputs[1,]
                 
-            # Look up the BG flag to decide whether BG neurons are simulated:
-            if self.bg_is_sync:
+            # Check which state the BG should be in:
+            if (t < self.ERD_tick) or (t > self.ERS_tick):
                 # BG are SYNC, all nodes fire at the same 
                 # time using provided frequency:
                 tick_to_spike = int(1000.0/self.bg_sync_freq)    
@@ -485,7 +492,13 @@ class SpikingNeuralNetwork(object):
                 # BG are DESYNC and are firing in the random mode:
                 # 
                 # Create random spikes:
-                bg_inputs=np.random.randint(2, size=(self.bg_nodes,))    
+                # This creates a very active firing pattern
+                # bg_inputs=np.random.randint(2, size=(self.bg_nodes,))    
+                # This should create a rather sparse random pattern:
+                bg_inputs=np.zeros((self.bg_nodes))    
+                for n in xrange(0,self.bg_nodes):
+                    if np.random.random() < 0.1:
+                        bg_inputs[n]=1.0
                 # DEBUG:
                 # print "Tick",t,"; BG are DESYNC"
                 # print "BG_inputs =",bg_inputs

@@ -44,7 +44,10 @@ class GeneticAlgorithm(object):
                  max_ticks=1000,
                  switch_tick=500,
                  # BG params:
-                 bg_nodes=2,    
+                 bg_nodes=2,  
+                 ERD_tick=450,
+                 ERS_tick=550,
+                 bg_flag=False,
                  bg_sync_freq=25):
         # GA params:
         # len_indv - length of vector representing a single individual
@@ -106,7 +109,10 @@ class GeneticAlgorithm(object):
         self.switch_tick=switch_tick
         
         # BG stuff:
-        self.bg_nodes=bg_nodes    
+        self.bg_nodes=bg_nodes  
+        self.ERD_tick=ERD_tick
+        self.ERS_tick=ERS_tick
+        self.bg_flag=bg_flag
         self.bg_sync_freq=bg_sync_freq
         
     # end INIT   
@@ -247,8 +253,12 @@ class GeneticAlgorithm(object):
                                        out_ma_len=self.out_ma_len,
                                        tau=self.tau,
                                        max_ticks=self.max_ticks,
+                                       switch_tick=self.switch_tick,
                                        # BG stuff:
                                        bg_nodes=self.bg_nodes,
+                                       ERD_tick=self.ERD_tick,
+                                       ERS_tick=self.ERS_tick,
+                                       bg_flag=self.bg_flag,
                                        bg_sync_freq=self.bg_sync_freq)
         
         # Convert the vector into weight matrices:
@@ -465,8 +475,12 @@ class GeneticAlgorithm(object):
                                                 out_ma_len=self.out_ma_len,
                                                 tau=self.tau,
                                                 max_ticks=self.max_ticks,
+                                                switch_tick=self.switch_tick,
                                                 # BG stuff:
                                                 bg_nodes=self.bg_nodes,
+                                                ERD_tick=self.ERD_tick,
+                                                ERS_tick=self.ERS_tick,
+                                                bg_flag=self.bg_flag,
                                                 bg_sync_freq=self.bg_sync_freq)
         
             # Convert the vector into weight matrices:
@@ -475,16 +489,25 @@ class GeneticAlgorithm(object):
             # update the SNN with weight matrices:
             best_network.from_matrix(w_ih, w_hh, w_ho, w_ch, w_bgh, self.node_types)      
             
-            print "(BG are SYNC) Using the switch tick =", best_network.switch_tick
-            best_network.bg_is_sync=True
+            print "(TRAINED) Using the switch tick =", best_network.switch_tick
             # now plot behavior: 
-            self.show_behavior(best_network, file_tag='switch@'+str(best_network.switch_tick)+'_SYNC') 
+            self.show_behavior(best_network, file_tag='switch@'+str(best_network.switch_tick)+'_TRAIN') 
             
-            # Test whether the behavior is affected by the BG:
-            best_network.bg_is_sync=False    
-            print "(BG are DESYNC) Using the switch tick =", best_network.switch_tick
+            # Test at a different time point:
+            best_network.switch_tick=750
+            best_network.ERD_tick=700
+            best_network.ERS_tick=800
+            print "(TEST) Using the switch tick =", best_network.switch_tick
             # now plot behavior: 
-            self.show_behavior(best_network, file_tag='switch@'+str(best_network.switch_tick)+'_DESYNC') 
+            self.show_behavior(best_network, file_tag='switch@'+str(best_network.switch_tick)+'_TEST') 
+            
+            # Test w/o DESYNC:
+            best_network.switch_tick=300
+            best_network.ERD_tick=1100
+            best_network.ERS_tick=1100
+            print "(TEST, no ERD) Using the switch tick =", best_network.switch_tick
+            # now plot behavior: 
+            self.show_behavior(best_network, file_tag='switch@'+str(best_network.switch_tick)+'_TEST_wo_ERD') 
             
             # EXP 9.7.03: TURN THIS OFF FOR NOW!
             # now test the behavior with the switching ticked moved away from
@@ -553,8 +576,28 @@ class GeneticAlgorithm(object):
         axes.set_ylim([0,self.n_nodes_hidden+1])
         axes.set_xlim([0,self.max_ticks+1])
         plb.show()
-        current_figure.savefig('spikes_plot_'+file_tag+'.png', dpi=300)                
+        current_figure.savefig('spikes_plot_'+file_tag+'.png', dpi=300)  
 
+        # Plot the spiking of the BG neurons:              
+        bg_spike_neuron = []
+        bg_spike_tick = []
+        for tick in xrange(0, network.max_ticks):
+            for node in xrange(0, network.bg_nodes):
+                if network.bg_nodes_history[tick,node]>0.0:
+                    bg_spike_neuron.append(node+1)
+                    bg_spike_tick.append(tick)            
+
+        # Make a spike raster plot:
+        current_figure = plb.figure(figsize=(12.0,10.0))
+        plb.plot(bg_spike_tick, bg_spike_neuron,'k.')
+        plb.title('BG Spike Train Raster Plot')
+        plb.xlabel('Time, ticks')
+        plb.ylabel('BG Neuron #')
+        axes = plb.gca()
+        axes.set_ylim([0,self.bg_nodes+1])
+        axes.set_xlim([0,self.max_ticks+1])
+        plb.show()
+        current_figure.savefig('BG_spikes_plot_'+file_tag+'.png', dpi=300)
             
     # END SHOW_BEHAVIOR
     

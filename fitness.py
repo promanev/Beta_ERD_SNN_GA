@@ -37,47 +37,20 @@ class FitnessFunction(object):
         # this inertia is defined by the time constant "tau" and is, therefore,
         # chosen to be the grace period value:
         grace_period = int(network.tau)
-        
-        # 1. Run the simulation and compute the fitness score when the BG are 
-        # SYNC:
-        network.bg_is_sync = True
             
         network.run()
         rmse_total = 0.0
         rmse_this = 0.0
         
         for idx in xrange(0, network.n_nodes_output):
-            # SYNC -> nodes should NOT change!!!
-            rmse_this = np.sqrt(((network.out_states_history[grace_period:,idx] - self.target_vals[idx, 0]) ** 2).mean())
-            rmse_total += rmse_this
-            rmse_this = 0.0
-        
-        rmse_total = rmse_total / network.n_nodes_output
-        fit_sync = 1.0/(1.0 + rmse_total)
-        
-        # 2. Run the simulation and compute the fitness score when the BG are 
-        # DESYNC:
-        network.bg_is_sync = False
-            
-        network.run()
-        rmse_total = 0.0
-        rmse_this = 0.0
-        
-        for idx in xrange(0, network.n_nodes_output):
-            # SYNC -> nodes should change!!!
             rmse_this = np.sqrt(((network.out_states_history[grace_period:network.switch_tick,idx] - self.target_vals[idx, 0]) ** 2).mean())
             rmse_this += np.sqrt(((network.out_states_history[network.switch_tick+grace_period:,idx] - self.target_vals[idx, 1]) ** 2).mean())
             rmse_total += rmse_this
             rmse_this = 0.0
         
         rmse_total = rmse_total / network.n_nodes_output
-        fit_desync = 1.0/(1.0 + rmse_total)   
+        fitness = 1.0/(1.0 + rmse_total)
         
-        fitness = np.min((fit_sync, fit_desync))
-        if verbose:
-            print "fit_sync=",fit_sync
-            print "fit_desync=",fit_desync
-            print "Chose fitness:", np.min((fit_sync, fit_desync))
         return fitness
     
  
