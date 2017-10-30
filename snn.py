@@ -4,8 +4,6 @@ This version is for experiment 9.3: switching outputs mid-simulation.
 A cortical input added to the inputs. Weights connecting cortex with the hidden 
 layer are evolved too (for the lack of better judgement on what values should be
 hardcoded for them!)
-New in 9.4:
-    * Switch from state 1 to state 2 and then back to state 1
     
 """
 
@@ -13,7 +11,6 @@ New in 9.4:
 
 import numpy as np
 np.set_printoptions(precision=3)
-# import graphviz_plot as gpv
 np.seterr(over='ignore', divide='raise')
 
 # Local class
@@ -147,6 +144,7 @@ class SpikingNeuralNetwork(object):
     def __init__(self,
                  w_ih=None,
                  w_ch=None,
+                 w_bgh=None,
                  w_hh=None,
                  w_ho=None,
                  node_types=['tonic_spike'],
@@ -160,10 +158,15 @@ class SpikingNeuralNetwork(object):
                  tau=1.5,
                  weight_epsilon=1e-3,
                  max_ticks=1000,
-                 switch_tick=[300, 600]):
+                 switch_tick=500,
+                 bg_nodes=2,
+                 bg_sync_freq=25,
+                 bg_is_sync=False):
+        
         # Set instance vars
         self.w_ih                 = w_ih
         self.w_ch                 = w_ch
+        self.w_bgh                = w_bgh
         self.w_hh                 = w_hh
         self.w_ho                 = w_ho
         self.node_types           = node_types
@@ -178,6 +181,9 @@ class SpikingNeuralNetwork(object):
         self.weight_epsilon       = weight_epsilon # Min.vlue of a synaptic weight for it to be considered for calculation         
         self.max_ticks            = max_ticks
         self.switch_tick          = switch_tick
+        self.bg_nodes             = bg_nodes
+        self.bg_sync_freq         = bg_sync_freq
+        self.bg_is_sync           = bg_is_sync
 
 
     def convert_nodes(self):
@@ -191,10 +197,11 @@ class SpikingNeuralNetwork(object):
     #TO DO: Have to take in weights as several matrices for each layer 
     # separately (only feed-forward connnetctions and intra-layer 
     # connections for the hidden layer):         
-    def from_matrix(self, w_ih, w_hh, w_ho, w_ch=None, node_types=['tonic_spike']):
+    def from_matrix(self, w_ih, w_hh, w_ho, w_ch=None, w_bgh=None, node_types=['tonic_spike']):
         """ Constructs a network from weight matrices: 
             w_ih - weights from inputs to hidden
             w_ch - weights from cortex to hidden (defaulted to None to allow backwards compatibility)
+            w_bgh - weights from the basal ganglia to hidden (defaulted to None to allow backwards compatibility)
             w_hh - weights from hidden to hidden
             w_ho - weights from hidden to output
             node_types - the number of types should be equal to the number of 
@@ -207,6 +214,10 @@ class SpikingNeuralNetwork(object):
         if w_ch is not None:
             if self.n_nodes_cortex is None:
                 self.n_nodes_cortex = w_ch.shape[0]
+        if w_bgh is not None:
+            if self.bg_nodes is None:
+                self.bg_nodes = w_bgh.shape[0]        
+                
         if self.n_nodes_hidden is None:
             self.n_nodes_hidden = w_hh.shape[0]
         if self.n_nodes_output is None:
@@ -228,6 +239,8 @@ class SpikingNeuralNetwork(object):
             self.w_ih = w_ih
         if self.w_ch is None and w_ch is not None:
             self.w_ch = w_ch
+        if self.w_bgh is None and w_bgh is not None:
+            self.w_bgh = w_bgh            
         if self.w_hh is None:    
             self.w_hh = w_hh
         if self.w_ho is None:    
@@ -252,7 +265,7 @@ class SpikingNeuralNetwork(object):
     # b) there are separate weight matrices, c) the state of the output neuron 
     # is passed through a moving average (Candadai Vasu and Izquierdo, 2017), 
     # d) there is optional bias neuron feeding into hidden layer              
-    def feed(self, inputs, cortical_inputs):
+    def feed(self, inputs, cortical_inputs, bg_inputs=None, verbose=False):
         """
         This function runs the simulation of an SNN for one tick using forward Euler 
         integration method with step 0.5 (2 summation steps). This approach is
@@ -264,15 +277,18 @@ class SpikingNeuralNetwork(object):
                     sensor data or return of the output neurons' states).
         fired_ids - a binary vector containing the binary states of hidden neurons maintained externally.
                     Should be all zeros for the first tick
+        cortical_inputs - binary inputs from 2 neurons that output [1,0] for 
+                          motor state 1 and [0,1] for motor state 2
+        bg_inputs - (optional) inputs from simulated basal ganglia neurons into
+                    the hidden layer                  
+                    
         """
         
         # Some housekeeping:
         n_nodes_input = self.n_nodes_input
         n_nodes_cortex = self.n_nodes_cortex
         n_nodes_hidden = self.n_nodes_hidden
-        
-        # minimum weight that is considered for calculation:
-        weight_epsilon = self.weight_epsilon 
+        bg_nodes = self.bg_nodes
         
         # node types vector:
         node_types = self.node_types
@@ -291,58 +307,51 @@ class SpikingNeuralNetwork(object):
         # Output neurons cannot do this as it is assumed that there are no recurrent connections.
         I = np.zeros(n_nodes_hidden)
         
-        # DEBUG:
-        # print "Network received inputs:",inputs
         if self.add_bias:
-            
-            # DEBUG:
-            # print "Inputs =", inputs
-            
-            inputs = np.hstack((inputs,1.0))
-            
-            # DEBUG:
-            # print "...but since there is a bias node, I am adding a 1.0 in the end:", inputs
-            
+            inputs = np.hstack((inputs,1.0))          
             n_nodes_input+=1
         # Optional but used in the Vasu & Izquierdo (2017):
         # Pass inputs through sigmoidal activation function:
         inputs = 1.0 / (1.0 + np.exp(-inputs)) 
-        
-        # DEBUG:
-        # print "Inputs after activation function was applied:", inputs    
 
         # 1a. Process CORTEX->HIDDEN:  
         for i in xrange(0, n_nodes_cortex):
             # DEBUG
             # print "Processing cortical input node #",i,"out of", n_nodes_cortex
             
-            for j in xrange(0, n_nodes_hidden):
-                # DEBUG:
-                # print "Processing hidden node #",j,"out of", n_nodes_hidden
-                # print "w_ch has shape", self.w_ch.shape
-                # print "Cortical inputs all:", cortical_inputs
-                # print "Cortical inputs this:", cortical_inputs[i]
-                
-                if self.w_ch[i,j] > weight_epsilon: # skip the next step if the synaptic connection = 0 for speed
-                    I[j] += self.w_ch[i,j] * cortical_inputs[i]
-        # DEBUG
-        # print "I after all cortical inputs were processed:"
-        # print I
+            for j in xrange(0, n_nodes_hidden):                
+#                if self.w_ch[i,j] is not 0.0: # skip the next step if the synaptic connection = 0 for speed
+                # if verbose:
+                    # print "I[",j,"]=",I[j]
+                    # print "self.w_ch has shape:",self.w_ch.shape
+                    # print "self.w_ch[",i,",",j,"]=",self.w_ch[i,j]
+                    # print "cortical_inputs[",i,"]=",cortical_inputs[i]
+                I[j] += self.w_ch[i,j] * cortical_inputs[i]
             
         # 1b. Process INPUTS->HIDDEN:    
         for i in xrange(0, n_nodes_input):
-            # DEBUG
-            # print "Processing input node #",i,"out of", n_nodes_input
             for j in xrange(0, n_nodes_hidden):
-                # DEBUG:
-                # print "Processing hidden node #",j,"out of", n_nodes_hidden
-                # print "w_ih has shape", self.w_ih.shape
-                if self.w_ih[i,j] > weight_epsilon: # skip the next step if the synaptic connection = 0 for speed
-                    I[j] += self.w_ih[i,j] * inputs[i]
-        # DEBUG
-        # print "I after all inputs were processed:"
-        # print I
-
+#                if self.w_ih[i,j] is not 0.0: # skip the next step if the synaptic connection = 0 for speed
+                I[j] += self.w_ih[i,j] * inputs[i]
+        
+        # 1c. (OPTIONAL, only if provided) Process BG->HIDDEN:    
+        if bg_inputs is not None:    
+            # DEBUG:
+            # print "BG_inputs are", bg_inputs        
+            # print "I before BG inputs",I
+            for i in xrange(0, bg_nodes):
+                # DEBUG
+                # print "Processing input node #",i,"out of", n_nodes_input
+                for j in xrange(0, n_nodes_hidden):
+                    # DEBUG:
+                    # print "Processing hidden node #",j,"out of", n_nodes_hidden
+                    # print "bg_inputs[",i,"]=", bg_inputs[i]
+                    # print "w_bgh[",i,",",j,"]=",self.w_bgh[i,j]
+#                    if bg_inputs[i] is not 0.0:
+                    I[j] += self.w_bgh[i,j] * bg_inputs[i]
+            # DEBUG:
+            # print "After processing BG_inputs, I=",I
+        
         
         # 2. Detect spikes in the HIDDEN layer (according to membrane potential values reached 
         # on the previous tick) and update the fired_ids vector.                    
@@ -365,8 +374,8 @@ class SpikingNeuralNetwork(object):
             for i in xrange(0, n_nodes_hidden):
                 if self.fired_ids[i]>0:
                     for j in xrange(0, n_nodes_hidden):            
-                        if self.w_hh[i,j] > weight_epsilon:
-                            I[j] += self.w_hh[i,j] # no need to multiply by the state of i-th hidden neuron because it's = 1
+#                        if self.w_hh[i,j] is not 0.0:
+                        I[j] += self.w_hh[i,j] # no need to multiply by the state of i-th hidden neuron because it's = 1
 
         # DEBUG:                
         # print "I after all previous hid->hid spikes were processed:"
@@ -447,33 +456,50 @@ class SpikingNeuralNetwork(object):
         # Option 2: Output neurons are initialized with all ones - mgiht help SNN to bootstrap internal activity?    
         out_state = np.ones(self.n_nodes_output)
         
+        # Init a vector that will hold all of BG spikes:
+        bg_nodes_history = np.zeros((self.max_ticks, self.bg_nodes))
+        
         # Main cycle
         for t in xrange(0, self.max_ticks):
             # First, determine what type of cortical input to provide to the SNN:
-            if t < self.switch_tick[0]:
-                
-                # DEBUG:
-                # print "Tick",t,"< switch tick =", self.switch_tick
-                # print "Sending cortical input =", cortical_inputs[0,]
-                
+            if t < self.switch_tick:                
                 cortical_input_this = cortical_inputs[0,]
-            elif t>= self.switch_tick[0] and t < self.switch_tick[1]:
+            else:
                 cortical_input_this = cortical_inputs[1,]
-            elif t >= self.switch_tick[1]:     
-                cortical_input_this = cortical_inputs[0,]
                 
+            # Look up the BG flag to decide whether BG neurons are simulated:
+            if self.bg_is_sync:
+                # BG are SYNC, all nodes fire at the same 
+                # time using provided frequency:
+                tick_to_spike = int(1000.0/self.bg_sync_freq)    
+                # Create bg_inupts:
+                if np.mod(t,tick_to_spike)==0:    
+                    bg_inputs=np.ones((self.bg_nodes))
+                else:
+                    bg_inputs=np.zeros((self.bg_nodes))
+                # DEBUG:
+                # print "Tick",t,"; BG are SYNC"
+                # print "BG_inputs =",bg_inputs
+                        
+            else:
+                # BG are DESYNC and are firing in the random mode:
+                # 
+                # Create random spikes:
+                bg_inputs=np.random.randint(2, size=(self.bg_nodes,))    
+                # DEBUG:
+                # print "Tick",t,"; BG are DESYNC"
+                # print "BG_inputs =",bg_inputs
+                    
+            bg_nodes_history[t,] = bg_inputs                
+            
             # during the first tick the SNN receives the maximal stimulus to bootstrap the neural activity:
             if t==0:
-                self.feed(np.ones(self.n_nodes_input), cortical_input_this)
+                self.feed(np.ones(self.n_nodes_input), cortical_input_this, bg_inputs, verbose=verbose)
             else:
-                self.feed(out_states_history[t-1,], cortical_input_this)
+                self.feed(out_states_history[t-1,], cortical_input_this, bg_inputs, verbose=verbose)
                 
             # record the states of the hidden neurons after this tick has been simulated:
             hid_states_history[t,] = self.fired_ids
-            
-            # DEBUG:
-            # print "Fired_ids:", self.fired_ids
-            # print "Recorded in the history var:", hid_states_history[t,]
             
             # now approximate the output neurons. Ideally, last self.out_ma_len ticks 
             # should be used, but dirung the first ticks the window is shorter:
@@ -481,17 +507,10 @@ class SpikingNeuralNetwork(object):
                 window_len = t+1
             else:
                 window_len = self.out_ma_len
-                
-            # DEBUG:
-            # print "Avging window is", self.out_ma_len
-            # print "...but using window", window_len,"because the tick is",t
-                
+   
             # init a local vector that will store approximated states of hidden neurons 
             # (will be used to update output neurons):
             hidden_avg_states = np.zeros(self.n_nodes_hidden)
-            
-            # DEBUG:
-            # print "Init the vector for averaged hidden neurons' states:",hidden_avg_states
             
             # there is no point of averaging neurons' states on the first tick as there is no history and 
             # averaging function over [0,0] produces nan:
@@ -499,54 +518,44 @@ class SpikingNeuralNetwork(object):
                 for i in xrange(0, self.n_nodes_hidden):
                     hidden_avg_states[i] = np.mean(hid_states_history[t+1-window_len:t, i])
             
-                    if verbose:
-                    # DEBUG:
-                        # print "Avging hidden neuron #",i
-                        # print "Looking up its states over the period [",t+1-window_len,",",t,"]"
-                        # print "Its history of firing:",hid_states_history[t+1-window_len:t, i]
-                        # print "Therefore, its avg. firing rate =",hidden_avg_states[i]
-                        print "Neuron",i," avg. fir.rate =",hidden_avg_states[i]
+                    # if verbose:
+                        # print "Neuron",i," avg. fir.rate =",hidden_avg_states[i]
                         
             # now update states of output neurons:
             for i in xrange(0,self.n_nodes_output):
                 
                 # DEBUG:
-                if verbose:    
-                    print "Calculating influence on output neuron #", i
+                # if verbose:    
+                    # print "Calculating influence on output neuron #", i
                 
                 # first calculate the sum of influences of all hidden neurons on this output neuron:
                 influence = 0.0    
                 for j in xrange(0,self.n_nodes_hidden):
                     
-                    if verbose:
+                    # if verbose:
                     # DEBUG:
                         # print "Avg. state of hidden neuron #",j,"is", hidden_avg_states[j]
-                        print "Weight w_ho[",j,",",i,"] =", self.w_ho[j,i]
+                        # print "Weight w_ho[",j,",",i,"] =", self.w_ho[j,i]
                     
                     influence += self.w_ho[j,i] * hidden_avg_states[j]
                    
-                    if verbose:
+                    # if verbose:
                     # DEBUG:
-                        print "Updated influence =", influence
+                        # print "Updated influence =", influence
                     
-                # numerically integrating using forward Euler method with 2 time steps:
-                
-                # DEBUG:
-                # print "out_state[",i,"] before num.integrating =", out_state[i]
-                
+                # numerically integrating using forward Euler method with 2 time steps:                
                 for h in xrange(0, integration_steps):
                     out_state[i] += (1.0 / float(integration_steps)) * (1.0 / self.tau) * (-out_state[i] + influence) 
-                
-                    # DEBUG
-                    # print "Intrg.step", h, "out_state[",i,"] =", out_state[i]
-            if verbose:
-                print "Output neurons' states:", out_state
+
+            # if verbose:
+                # print "Output neurons' states:", out_state
                 
             out_states_history[t,] = out_state
            
         # end MAIN CYCLE 
         self.out_states_history = out_states_history
         self.hid_states_history = hid_states_history
+        self.bg_nodes_history = bg_nodes_history
         
         return self
     # end RUN

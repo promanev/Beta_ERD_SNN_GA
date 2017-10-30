@@ -1,25 +1,23 @@
-"""
-Exp 9.4: Switching from state 1 to state 2 and then back to state 1.
-"""
-
 import numpy as np
-np.set_printoptions(precision=3)
 import math as m
 import random as rd
 import pylab as plb
-# from bokeh.plotting import figure, output_file, show
+
 
 from fitness import FitnessFunction
 from snn import SpikingNeuralNetwork
 
 def mean(numbers): # Arithmetic mean fcn
     return float(sum(numbers)) / max(len(numbers), 1)
-# end MEAN fcn
 
 class GeneticAlgorithm(object):
-    # Comments:
-    #
-    # 
+    """
+    Genetic algorithm is based on Floreano's work on using SNN for Khepera 
+    robots with some modifications. 
+    A clumsy implementation, this GA holds parameters for itself and for SNNs 
+    that it creates for fitness evaluations. Maybe there is a way to keep 
+    variables separately for each class?
+    """
     def __init__(self, 
                  len_indv=40, 
                  pop_size=100, 
@@ -42,10 +40,12 @@ class GeneticAlgorithm(object):
                  intralayer_connections_flag=False,
                  add_bias=True,
                  out_ma_len=20,
-                 tau=5.0,
-                 weight_epsilon=0.01,
+                 tau=50.0,
                  max_ticks=1000,
-                 switch_tick=[300, 600]):
+                 switch_tick=500,
+                 # BG params:
+                 bg_nodes=2,    
+                 bg_sync_freq=25):
         # GA params:
         # len_indv - length of vector representing a single individual
         # pop_size - number of individuals in the population
@@ -74,6 +74,10 @@ class GeneticAlgorithm(object):
         # max_ticks - the number of time steps used to simulate SNN activity
         # switch_tick - the tick when the cortical neurons will switch from one type of firing to another
         
+        # BG params:
+        # bg_nodes - number of simulated BG nodes
+        # bg_sync_freq - frequency at which the BG neurons will synchronize (e.g., 25 Hz -> spike once every 40 ticks)
+        
         # GA stuff:
         self.len_indv=len_indv
         self.pop_size=pop_size
@@ -98,9 +102,13 @@ class GeneticAlgorithm(object):
         self.add_bias=add_bias
         self.out_ma_len=out_ma_len
         self.tau=tau
-        self.weight_epsilon=weight_epsilon
         self.max_ticks=max_ticks
         self.switch_tick=switch_tick
+        
+        # BG stuff:
+        self.bg_nodes=bg_nodes    
+        self.bg_sync_freq=bg_sync_freq
+        
     # end INIT   
     
     def save_weights_txt(self, weight_matrix, filename):
@@ -139,6 +147,8 @@ class GeneticAlgorithm(object):
             n_nodes_cortex = self.n_nodes_cortex
         n_nodes_hidden = self.n_nodes_hidden
         n_nodes_output = self.n_nodes_output
+        if self.bg_nodes is not None:
+            bg_nodes = self.bg_nodes
         
         w_ih = np.zeros((n_nodes_input, n_nodes_hidden), dtype=float)
         if self.intralayer_connections_flag:
@@ -150,6 +160,11 @@ class GeneticAlgorithm(object):
             w_ch = np.zeros((n_nodes_cortex, n_nodes_hidden), dtype=float)
         else:
             w_ch = None
+        
+        if self.bg_nodes is not None:
+            w_bgh = np.zeros((bg_nodes, n_nodes_hidden), dtype=float)    
+        else:
+            w_bgh = None
             
         w_ho = np.zeros((n_nodes_hidden, n_nodes_output), dtype=float)
         
@@ -169,6 +184,13 @@ class GeneticAlgorithm(object):
                 end_id = start_id + n_nodes_hidden
             
                 w_ch[row,] = pop_member[start_id:end_id]
+                
+        if self.bg_nodes is not None:
+            for row in xrange(0, bg_nodes):
+                start_id = row * n_nodes_hidden + pointer
+                end_id = start_id + n_nodes_hidden
+            
+                w_bgh[row,] = pop_member[start_id:end_id]                
         
         pointer = end_id
         
@@ -197,12 +219,16 @@ class GeneticAlgorithm(object):
             
             if self.n_nodes_cortex is not None:
                 filename = fname + '_CH.txt'
-                self.save_weights_txt(w_ch, filename)                   
+                self.save_weights_txt(w_ch, filename)     
+                
+            if self.bg_nodes is not None:
+                filename = fname + '_BGH.txt'
+                self.save_weights_txt(w_bgh, filename)                  
             
             filename = fname + '_HO.txt'
             self.save_weights_txt(w_ho, filename)            
             
-        return (w_ih, w_ch, w_hh, w_ho)        
+        return (w_ih, w_ch, w_bgh, w_hh, w_ho)        
         
     def get_fitness(self, pop_member):
         """
@@ -220,14 +246,16 @@ class GeneticAlgorithm(object):
                                        add_bias=self.add_bias,
                                        out_ma_len=self.out_ma_len,
                                        tau=self.tau,
-                                       weight_epsilon=self.weight_epsilon,
-                                       max_ticks=self.max_ticks)
+                                       max_ticks=self.max_ticks,
+                                       # BG stuff:
+                                       bg_nodes=self.bg_nodes,
+                                       bg_sync_freq=self.bg_sync_freq)
         
         # Convert the vector into weight matrices:
-        (w_ih, w_ch, w_hh, w_ho) = self.convert_pop_member(pop_member, save_flag=False)
+        (w_ih, w_ch, w_bgh, w_hh, w_ho) = self.convert_pop_member(pop_member, save_flag=False)
         
         # update the SNN with weight matrices:
-        network.from_matrix(w_ih, w_hh, w_ho, w_ch, self.node_types)    
+        network.from_matrix(w_ih, w_hh, w_ho, w_ch, w_bgh, self.node_types)    
             
         # Init a FitnessFunction object to evaluate the SNN:
         fitness_fcn = FitnessFunction(self.target_values)
@@ -400,7 +428,15 @@ class GeneticAlgorithm(object):
             best_fit[gen]=max(fitness)
             avg_fit[gen]=mean(fitness)
             if verbose:
-                print "Best fit=",best_fit[gen],"Avg.fit=",avg_fit[gen]
+                if gen > 0:
+                    percent_since_last = 100 * ( (best_fit[gen] - best_fit[gen-1]) / best_fit[gen-1])
+                    percent_since_beg = 100 * ( (best_fit[gen] - best_fit[0]) / best_fit[0])
+                    print("Best fit = %.3f (%.1f %% since last; %.1f %% since start); Avg fit = %.3f" % (best_fit[gen],
+                                                                                                         percent_since_last,
+                                                                                                         percent_since_beg,
+                                                                                                         avg_fit[gen]) )
+                else:
+                    print("Best fit = %.3f; Avg fit = %.3f" % (best_fit[gen], avg_fit[gen]) ) 
     
             # select parents for mating:
             (par_ids, worst_ids) = self.select_parents(fitness)
@@ -428,28 +464,39 @@ class GeneticAlgorithm(object):
                                                 add_bias=self.add_bias,
                                                 out_ma_len=self.out_ma_len,
                                                 tau=self.tau,
-                                                weight_epsilon=self.weight_epsilon,
-                                                max_ticks=self.max_ticks)
+                                                max_ticks=self.max_ticks,
+                                                # BG stuff:
+                                                bg_nodes=self.bg_nodes,
+                                                bg_sync_freq=self.bg_sync_freq)
         
             # Convert the vector into weight matrices:
-            (w_ih, w_ch, w_hh, w_ho) = self.convert_pop_member(pop[best5_ids[0]], save_flag=False)
+            (w_ih, w_ch, w_bgh, w_hh, w_ho) = self.convert_pop_member(pop[best5_ids[0]], save_flag=False)
         
             # update the SNN with weight matrices:
-            best_network.from_matrix(w_ih, w_hh, w_ho, w_ch, self.node_types)      
+            best_network.from_matrix(w_ih, w_hh, w_ho, w_ch, w_bgh, self.node_types)      
             
-            print "Using the switch ticks =", best_network.switch_tick
+            print "(BG are SYNC) Using the switch tick =", best_network.switch_tick
+            best_network.bg_is_sync=True
             # now plot behavior: 
-            self.show_behavior(best_network, file_tag='switch@300_600') 
+            self.show_behavior(best_network, file_tag='switch@'+str(best_network.switch_tick)+'_SYNC') 
             
+            # Test whether the behavior is affected by the BG:
+            best_network.bg_is_sync=False    
+            print "(BG are DESYNC) Using the switch tick =", best_network.switch_tick
+            # now plot behavior: 
+            self.show_behavior(best_network, file_tag='switch@'+str(best_network.switch_tick)+'_DESYNC') 
+            
+            # EXP 9.7.03: TURN THIS OFF FOR NOW!
             # now test the behavior with the switching ticked moved away from
             # the value used during the training:
-            best_network.switch_tick = [450, 750]
-            print "Using the switch tick =", best_network.switch_tick                
-            self.show_behavior(best_network, file_tag='switch@450_750')
+            # best_network.switch_tick = 700
+            # print "(BG are ON) Using the switch tick =", best_network.switch_tick                
+            # self.show_behavior(best_network, file_tag='switch@700_BGon')
             
         # FITNESS PLOT:    
         #
         # create a new plot:
+        plb.figure(figsize=(12.0,10.0))
         gens=np.arange(0,self.max_gen)
         plb.plot(gens,best_fit,'b')
         plb.plot(gens,avg_fit,'r')
@@ -465,17 +512,16 @@ class GeneticAlgorithm(object):
         This method plots behavior of output nodes vs. the targets
         """
         
-        # network.run(verbose=True)
-        network.run()
+        network.run(verbose=True)
+        # network.run()
         ticks=np.arange(0, network.max_ticks)
         # Plot the behavior of the output nodes:    
         for node in xrange(0,network.n_nodes_output):
             plb.figure(figsize=(12.0,10.0))
             plb.plot(ticks, network.out_states_history[:,node],'r',label='Output node '+str(node))
-            target_vector_01 = np.full((1, network.switch_tick[0]), self.target_values[node,0])
-            target_vector_02 = np.full((1, network.switch_tick[1] - network.switch_tick[0]), self.target_values[node,1])
-            target_vector_03 = np.full((1, network.max_ticks - network.switch_tick[1]), self.target_values[node,0])
-            target_vector = np.hstack((target_vector_01,target_vector_02, target_vector_03))
+            target_vector_01 = np.full((1, network.switch_tick), self.target_values[node,0])
+            target_vector_02 = np.full((1, network.max_ticks - network.switch_tick), self.target_values[node,1])
+            target_vector = np.hstack((target_vector_01,target_vector_02))
             # print "Targets' vector shape:", target_vector.shape
             # print "Ticks' shape:", ticks.shape
             plb.plot(ticks, target_vector[0,:], 'b', label='Target for node '+str(node))
@@ -496,21 +542,8 @@ class GeneticAlgorithm(object):
                 if network.hid_states_history[tick,node]>0.0:
                     spike_neuron.append(node+1)
                     spike_tick.append(tick)            
-        
-            
-            
-            
-        # DEBUG:
-        # print "Outputting the hidden layer spikes:"
-        # for tick in xrange(0, self.max_ticks):
-        #     print network.hid_states_history[tick,]
-            
-        # num_epoch = int( np.floor(self.max_ticks-1 / 1000) ) + 1
-        
-        # DEBUG:
-        # print "Total ticks =", self.max_ticks
-        # print "Number of 1000 tick epochs (including the last that may be < 1000) =", num_epoch
-        
+
+        # Make a spike raster plot:
         current_figure = plb.figure(figsize=(12.0,10.0))
         plb.plot(spike_tick, spike_neuron,'k.')
         plb.title('Spike Train Raster Plot')
